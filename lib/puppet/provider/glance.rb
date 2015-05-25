@@ -15,7 +15,8 @@ class Puppet::Provider::Glance < Puppet::Provider
       glance_file['keystone_authtoken']['auth_protocol'] and
       glance_file['keystone_authtoken']['admin_tenant_name'] and
       glance_file['keystone_authtoken']['admin_user'] and
-      glance_file['keystone_authtoken']['admin_password']
+      glance_file['keystone_authtoken']['admin_password'] and
+      glance_file['DEFAULT']['os_region_name']
 
         g = {}
         g['auth_host'] = glance_file['keystone_authtoken']['auth_host'].strip
@@ -24,9 +25,25 @@ class Puppet::Provider::Glance < Puppet::Provider
         g['admin_tenant_name'] = glance_file['keystone_authtoken']['admin_tenant_name'].strip
         g['admin_user'] = glance_file['keystone_authtoken']['admin_user'].strip
         g['admin_password'] = glance_file['keystone_authtoken']['admin_password'].strip
+        g['os_region_name'] = glance_file['DEFAULT']['os_region_name'].strip
 
         # auth_admin_prefix not required to be set.
         g['auth_admin_prefix'] = (glance_file['keystone_authtoken']['auth_admin_prefix'] || '').strip
+
+        return g
+    elsif glance_file and glance_file['keystone_authtoken'] and
+      glance_file['keystone_authtoken']['identity_uri'] and
+      glance_file['keystone_authtoken']['admin_tenant_name'] and
+      glance_file['keystone_authtoken']['admin_user'] and
+      glance_file['keystone_authtoken']['admin_password'] and
+      glance_file['DEFAULT']['os_region_name']
+
+        g = {}
+        g['identity_uri'] = glance_file['keystone_authtoken']['identity_uri'].strip
+        g['admin_tenant_name'] = glance_file['keystone_authtoken']['admin_tenant_name'].strip
+        g['admin_user'] = glance_file['keystone_authtoken']['admin_user'].strip
+        g['admin_password'] = glance_file['keystone_authtoken']['admin_password'].strip
+        g['os_region_name'] = glance_file['DEFAULT']['os_region_name'].strip
 
         return g
     else
@@ -44,7 +61,11 @@ class Puppet::Provider::Glance < Puppet::Provider
 
   def self.get_auth_endpoint
     g = glance_credentials
-    "#{g['auth_protocol']}://#{g['auth_host']}:#{g['auth_port']}#{g['auth_admin_prefix']}/v2.0/"
+    if g.key?('identity_uri')
+      "#{g['identity_uri']}/"
+    else
+      "#{g['auth_protocol']}://#{g['auth_host']}:#{g['auth_port']}#{g['auth_admin_prefix']}/v2.0/"
+    end
   end
 
   def self.glance_file
@@ -72,11 +93,11 @@ class Puppet::Provider::Glance < Puppet::Provider
   def self.auth_glance(*args)
     begin
       g = glance_credentials
-      glance('-T', g['admin_tenant_name'], '-I', g['admin_user'], '-K', g['admin_password'], '-N', auth_endpoint, args)
+      remove_warnings(glance('--os-tenant-name', g['admin_tenant_name'], '--os-username', g['admin_user'], '--os-password', g['admin_password'], '--os-region-name', g['os_region_name'], '--os-auth-url', auth_endpoint, args))
     rescue Exception => e
       if (e.message =~ /\[Errno 111\] Connection refused/) or (e.message =~ /\(HTTP 400\)/) or (e.message =~ /HTTP Unable to establish connection/)
         sleep 10
-        glance('-T', g['admin_tenant_name'], '-I', g['admin_user'], '-K', g['admin_password'], '-N', auth_endpoint, args)
+        remove_warnings(glance('--os-tenant-name', g['admin_tenant_name'], '--os-username', g['admin_user'], '--os-password', g['admin_password'], '--os-region-name', g['os_region_name'], '--os-auth-url', auth_endpoint, args))
       else
         raise(e)
       end
@@ -90,7 +111,7 @@ class Puppet::Provider::Glance < Puppet::Provider
   def self.auth_glance_stdin(*args)
     begin
       g = glance_credentials
-      command = "glance -T #{g['admin_tenant_name']} -I #{g['admin_user']} -K #{g['admin_password']} -N #{auth_endpoint} #{args.join(' ')}"
+      command = "glance --os-tenant-name #{g['admin_tenant_name']} --os-username #{g['admin_user']} --os-password #{g['admin_password']} --os-region-name #{g['os_region_name']} --os-auth-url #{auth_endpoint} #{args.join(' ')}"
 
       # This is a horrible, horrible hack
       # Redirect stderr to stdout in order to report errors
@@ -106,18 +127,17 @@ class Puppet::Provider::Glance < Puppet::Provider
     self.class.auth_glance_stdin(args)
   end
 
-
   private
     def self.list_glance_images
       ids = []
-      (auth_glance('index').split("\n")[2..-1] || []).collect do |line|
-        ids << line.split[0]
+      (auth_glance('image-list').split("\n")[3..-2] || []).collect do |line|
+        ids << line.split('|')[1].strip()
       end
       return ids
     end
 
     def self.get_glance_image_attr(id, attr)
-      (auth_glance('show', id).split("\n") || []).collect do |line|
+      (auth_glance('image-show', id).split("\n") || []).collect do |line|
         if line =~ /^#{attr}:/
           return line.split(': ')[1..-1]
         end
@@ -126,10 +146,62 @@ class Puppet::Provider::Glance < Puppet::Provider
 
     def self.get_glance_image_attrs(id)
       attrs = {}
-      (auth_glance('show', id).split("\n") || []).collect do |line|
-        attrs[line.split(': ').first.downcase] = line.split(': ')[1..-1].to_s
+      (auth_glance('image-show', id).split("\n")[3..-2] || []).collect do |line|
+        attrs[line.split('|')[1].strip()] = line.split('|')[2].strip()
       end
       return attrs
     end
 
+    def parse_table(table)
+      # parse the table into an array of maps with a simplistic state machine
+      found_header = false
+      parsed_header = false
+      keys = nil
+      results = []
+      table.split("\n").collect do |line|
+        # look for the header
+        if not found_header
+          if line =~ /^\+[-|+]+\+$/
+            found_header = true
+            nil
+          end
+        # look for the key names in the table header
+        elsif not parsed_header
+          if line =~ /^(\|\s*[:alpha:]\s*)|$/
+            keys = line.split('|').map(&:strip)
+            parsed_header = true
+          end
+        # parse the values in the rest of the table
+        elsif line =~ /^|.*|$/
+          values = line.split('|').map(&:strip)
+          result = Hash[keys.zip values]
+          results << result
+        end
+      end
+      results
+    end
+
+    # Remove warning from the output. This is a temporary hack until
+    # things will be refactored to use the REST API
+    def self.remove_warnings(results)
+      found_header = false
+      in_warning = false
+      results.split("\n").collect do |line|
+        unless found_header
+          if line =~ /^\+[-\+]+\+$/ # Matches upper and lower box borders
+            in_warning = false
+            found_header = true
+            line
+          elsif line =~ /^WARNING/ or line =~ /UserWarning/ or in_warning
+            # warnings can be multi line, we have to skip all of them
+            in_warning = true
+            nil
+          else
+            line
+          end
+        else
+          line
+        end
+      end.compact.join("\n")
+    end
 end

@@ -14,16 +14,14 @@ describe 'glance::db::mysql' do
   describe "with default params" do
     let :params do
       {
-        :password => 'glancepass1'
+        :password => 'glancepass1',
       }
     end
 
-  it { should contain_class('mysql::python') }
-
-    it { should contain_mysql__db('glance').with(
-      :password => 'glancepass1',
-      :require  => 'Class[Mysql::Config]',
-      :charset  => 'latin1'
+    it { is_expected.to contain_openstacklib__db__mysql('glance').with(
+      :password_hash => '*41C910F70EB213CF4CB7B2F561B4995503C0A87B',
+      :charset       => 'utf8',
+      :collate       => 'utf8_general_ci',
     )}
 
   end
@@ -37,9 +35,10 @@ describe 'glance::db::mysql' do
       }
     end
 
-    it { should contain_mysql__db('glancedb2').with(
-      :password => 'glancepass2',
-      :charset  => 'utf8'
+    it { is_expected.to contain_openstacklib__db__mysql('glance').with(
+      :password_hash => '*6F9A1CB9BD83EE06F3903BDFF9F4188764E694CA',
+      :dbname        => 'glancedb2',
+      :charset       => 'utf8'
     )}
 
   end
@@ -53,17 +52,6 @@ describe 'glance::db::mysql' do
       }
     end
 
-    it {should_not contain_glance__db__mysql__host_access("127.0.0.1").with(
-      :user     => 'glance',
-      :password => 'glancepass2',
-      :database => 'glancedb2'
-    )}
-    it {should contain_glance__db__mysql__host_access("%").with(
-      :user     => 'glance',
-      :password => 'glancepass2',
-      :database => 'glancedb2'
-    )}
-
   end
 
   describe "overriding allowed_hosts param to string" do
@@ -75,11 +63,6 @@ describe 'glance::db::mysql' do
       }
     end
 
-    it {should contain_glance__db__mysql__host_access("192.168.1.1").with(
-      :user     => 'glance',
-      :password => 'glancepass2',
-      :database => 'glancedb2'
-    )}
   end
 
   describe "overriding allowed_hosts param equals to host param " do
@@ -91,11 +74,6 @@ describe 'glance::db::mysql' do
       }
     end
 
-    it {should_not contain_glance__db__mysql__host_access("127.0.0.1").with(
-      :user     => 'glance',
-      :password => 'glancepass2',
-      :database => 'glancedb2'
-    )}
   end
 
 end
