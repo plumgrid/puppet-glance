@@ -12,24 +12,22 @@ describe 'glance class' do
       case $::osfamily {
         'Debian': {
           include ::apt
-          # some packages are not autoupgraded in trusty.
-          # it will be fixed in liberty, but broken in kilo.
-          $need_to_be_upgraded = ['python-tz', 'python-pbr']
-          apt::source { 'trusty-updates-kilo':
-            location          => 'http://ubuntu-cloud.archive.canonical.com/ubuntu/',
-            release           => 'trusty-updates',
-            required_packages => 'ubuntu-cloud-keyring',
-            repos             => 'kilo/main',
-            trusted_source    => true,
-          } ->
-          package { $need_to_be_upgraded:
-            ensure  => latest,
+          class { '::openstack_extras::repo::debian::ubuntu':
+            release         => 'kilo',
+            package_require => true,
           }
         }
         'RedHat': {
-          include ::epel # Get our epel on
+          class { '::openstack_extras::repo::redhat::redhat':
+            release => 'kilo',
+          }
+          package { 'openstack-selinux': ensure => 'latest' }
+        }
+        default: {
+          fail("Unsupported osfamily (${::osfamily})")
         }
       }
+
       class { '::mysql::server': }
 
       # Keystone resources, needed by Glance to run
@@ -68,12 +66,20 @@ describe 'glance class' do
       class { '::glance::api':
         database_connection => 'mysql://glance:a_big_secret@127.0.0.1/glance?charset=utf8',
         verbose             => false,
-        keystone_password   => 'big_secret',
+        keystone_password   => 'a_big_secret',
       }
       class { '::glance::registry':
         database_connection => 'mysql://glance:a_big_secret@127.0.0.1/glance?charset=utf8',
         verbose             => false,
         keystone_password   => 'a_big_secret',
+      }
+
+      glance_image { 'test_image':
+        ensure           => present,
+        container_format => 'bare',
+        disk_format      => 'qcow2',
+        is_public        => 'yes',
+        source           => 'http://download.cirros-cloud.net/0.3.1/cirros-0.3.1-x86_64-disk.img',
       }
       EOS
 
@@ -82,5 +88,13 @@ describe 'glance class' do
       apply_manifest(pp, :catch_changes => true)
     end
 
+    describe 'glance images' do
+      it 'should create a glance image' do
+        shell('openstack --os-username glance --os-password a_big_secret --os-tenant-name services --os-auth-url http://127.0.0.1:5000/v2.0 image list') do |r|
+          expect(r.stdout).to match(/test_image/)
+          expect(r.stderr).to be_empty
+        end
+      end
+    end
   end
 end
