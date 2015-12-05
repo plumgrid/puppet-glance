@@ -38,7 +38,7 @@ RSpec.configure do |c|
         zuul_clone_cmd += "git://git.openstack.org #{repo}"
         on host, zuul_clone_cmd
       else
-        on host, "git clone -b stable/kilo https://git.openstack.org/#{repo} #{repo}"
+        on host, "git clone https://git.openstack.org/#{repo} -b stable/liberty #{repo}"
       end
 
       on host, "ZUUL_REF=#{zuul_ref} ZUUL_BRANCH=#{zuul_branch} ZUUL_URL=#{zuul_url} bash #{repo}/install_modules.sh"
@@ -50,7 +50,7 @@ RSpec.configure do |c|
       on host, "rm -fr #{repo}"
 
       # List modules installed to help with debugging
-      on host, puppet('module','list'), { :acceptable_exit_codes => [0] }
+      on host, puppet('module','list'), { :acceptable_exit_codes => 0 }
     end
   end
 end

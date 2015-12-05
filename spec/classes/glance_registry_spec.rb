@@ -2,17 +2,20 @@
 describe 'glance::registry' do
 
   let :facts do
-    {
-      :osfamily => 'Debian'
-    }
+    @default_facts.merge({
+     :osfamily       => 'Debian',
+     :processorcount => '7',
+    })
   end
 
   let :default_params do
     {
       :verbose                => false,
       :debug                  => false,
+      :use_stderr             => true,
       :bind_host              => '0.0.0.0',
       :bind_port              => '9191',
+      :workers                => facts[:processorcount],
       :log_file               => '/var/log/glance/registry.log',
       :log_dir                => '/var/log/glance',
       :database_connection    => 'sqlite:///var/lib/glance/glance.sqlite',
@@ -35,10 +38,9 @@ describe 'glance::registry' do
   [
     {:keystone_password => 'ChangeMe'},
     {
-      :verbose                => true,
-      :debug                  => true,
       :bind_host              => '127.0.0.1',
       :bind_port              => '9111',
+      :workers                => '5',
       :database_connection    => 'sqlite:///var/lib/glance.sqlite',
       :database_idle_timeout  => '360',
       :enabled                => false,
@@ -64,6 +66,7 @@ describe 'glance::registry' do
       end
 
       it { is_expected.to contain_class 'glance::registry' }
+      it { is_expected.to contain_class 'glance::registry::logging' }
 
       it { is_expected.to contain_service('glance-registry').with(
           'ensure'     => (param_hash[:manage_service] && param_hash[:enabled]) ? 'running' : 'stopped',
@@ -71,22 +74,10 @@ describe 'glance::registry' do
           'hasstatus'  => true,
           'hasrestart' => true,
           'subscribe'  => 'File[/etc/glance/glance-registry.conf]',
-          'require'    => 'Class[Glance]'
+          'require'    => 'Class[Glance]',
+          'tag'        => 'glance-service',
       )}
 
-      it 'is_expected.to only sync the db if sync_db is enabled' do
-
-        if param_hash[:sync_db]
-          is_expected.to contain_exec('glance-manage db_sync').with(
-            'path'        => '/usr/bin',
-            'command'     => 'glance-manage --config-file=/etc/glance/glance-registry.conf db_sync',
-            'refreshonly' => true,
-            'logoutput'   => 'on_failure',
-            'subscribe'   => ['Package[glance-registry]', 'File[/etc/glance/glance-registry.conf]'],
-            'notify'      => ["Service[glance-registry]"]
-          )
-        end
-      end
       it 'is_expected.to not sync the db if sync_db is set to false' do
 
         if !param_hash[:sync_db]
@@ -95,8 +86,7 @@ describe 'glance::registry' do
       end
       it 'is_expected.to configure itself' do
         [
-         'verbose',
-         'debug',
+         'workers',
          'bind_port',
          'bind_host',
         ].each do |config|
@@ -142,7 +132,8 @@ describe 'glance::registry' do
           'hasstatus'  => true,
           'hasrestart' => true,
           'subscribe'  => 'File[/etc/glance/glance-registry.conf]',
-          'require'    => 'Class[Glance]'
+          'require'    => 'Class[Glance]',
+          'tag'        => 'glance-service',
       )}
   end
 
@@ -223,68 +214,6 @@ describe 'glance::registry' do
     end
   end
 
-  describe 'with syslog disabled by default' do
-    let :params do
-      default_params
-    end
-
-    it { is_expected.to contain_glance_registry_config('DEFAULT/use_syslog').with_value(false) }
-    it { is_expected.to_not contain_glance_registry_config('DEFAULT/syslog_log_facility') }
-  end
-
-  describe 'with syslog enabled' do
-    let :params do
-      default_params.merge({
-        :use_syslog   => 'true',
-      })
-    end
-
-    it { is_expected.to contain_glance_registry_config('DEFAULT/use_syslog').with_value(true) }
-    it { is_expected.to contain_glance_registry_config('DEFAULT/syslog_log_facility').with_value('LOG_USER') }
-  end
-
-  describe 'with syslog enabled and custom settings' do
-    let :params do
-      default_params.merge({
-        :use_syslog   => 'true',
-        :log_facility => 'LOG_LOCAL0'
-     })
-    end
-
-    it { is_expected.to contain_glance_registry_config('DEFAULT/use_syslog').with_value(true) }
-    it { is_expected.to contain_glance_registry_config('DEFAULT/syslog_log_facility').with_value('LOG_LOCAL0') }
-  end
-
-  describe 'with log_file enabled by default' do
-    let(:params) { default_params }
-
-    it { is_expected.to contain_glance_registry_config('DEFAULT/log_file').with_value(default_params[:log_file]) }
-
-    context 'with log_file disabled' do
-      let(:params) { default_params.merge!({ :log_file => false }) }
-      it { is_expected.to contain_glance_registry_config('DEFAULT/log_file').with_ensure('absent') }
-    end
-  end
-
-  describe 'with log_dir enabled by default' do
-    let(:params) { default_params }
-
-    it { is_expected.to contain_glance_registry_config('DEFAULT/log_dir').with_value(default_params[:log_dir]) }
-
-    context 'with log_dir disabled' do
-      let(:params) { default_params.merge!({ :log_dir => false }) }
-      it { is_expected.to contain_glance_registry_config('DEFAULT/log_dir').with_ensure('absent') }
-    end
-  end
-
-  describe 'with no ssl options (default)' do
-    let(:params) { default_params }
-
-    it { is_expected.to contain_glance_registry_config('DEFAULT/ca_file').with_ensure('absent')}
-    it { is_expected.to contain_glance_registry_config('DEFAULT/cert_file').with_ensure('absent')}
-    it { is_expected.to contain_glance_registry_config('DEFAULT/key_file').with_ensure('absent')}
-  end
-
   describe 'with ssl options' do
     let :params do
       default_params.merge({
@@ -344,7 +273,9 @@ describe 'glance::registry' do
 
   describe 'on Debian platforms' do
     let :facts do
-      { :osfamily => 'Debian' }
+      @default_facts.merge({
+        :osfamily       => 'Debian',
+      })
     end
 
     # We only test this on Debian platforms, since on RedHat there isn't a
@@ -354,7 +285,7 @@ describe 'glance::registry' do
         let(:params) { default_params.merge({ :package_ensure => package_ensure }) }
         it { is_expected.to contain_package('glance-registry').with(
             :ensure => package_ensure,
-            :tag    => ['openstack']
+            :tag    => ['openstack', 'glance-package']
         )}
       end
     end
@@ -362,11 +293,14 @@ describe 'glance::registry' do
 
   describe 'on RedHat platforms' do
     let :facts do
-      { :osfamily => 'RedHat' }
+      @default_facts.merge({
+        :osfamily               => 'RedHat',
+        :operatingsystemrelease => '7',
+      })
     end
     let(:params) { default_params }
 
-    it { is_expected.to contain_package('openstack-glance')}
+    it { is_expected.to contain_package('openstack-glance') }
   end
 
   describe 'on unknown platforms' do

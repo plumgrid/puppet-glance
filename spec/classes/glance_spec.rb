@@ -3,9 +3,9 @@ require 'spec_helper'
 describe 'glance' do
 
   let :facts do
-    {
-      :osfamily => 'Debian'
-    }
+    @default_facts.merge({
+        :osfamily       => 'Debian',
+    })
   end
 
   let :default_params do
@@ -31,12 +31,18 @@ describe 'glance' do
         'mode'    => '0770'
       )}
 
+      it { is_expected.to contain_package('python-openstackclient').with(
+        :tag => 'openstack'
+      )}
+
     end
   end
 
   describe 'on Debian platforms' do
     let :facts do
-      { :osfamily => 'Debian' }
+      @default_facts.merge({
+        :osfamily       => 'Debian',
+      })
     end
     let(:params) { default_params }
 
@@ -45,12 +51,15 @@ describe 'glance' do
 
   describe 'on RedHat platforms' do
     let :facts do
-      { :osfamily => 'RedHat' }
+      @default_facts.merge({
+        :osfamily               => 'RedHat',
+        :operatingsystemrelease => '7',
+      })
     end
     let(:params) { default_params }
 
     it { is_expected.to contain_package('openstack-glance').with(
-        :tag => ['openstack'],
+        :tag => ['openstack', 'glance-package'],
     )}
   end
 

@@ -14,11 +14,11 @@
 #
 # [*verbose*]
 #   (optional) Rather to log the glance api service at verbose level.
-#   Default: false
+#   Default: undef
 #
 # [*debug*]
 #   (optional) Rather to log the glance api service at debug level.
-#   Default: false
+#   Default: undef
 #
 # [*bind_host*]
 #   (optional) The address of the host to bind to.
@@ -39,12 +39,12 @@
 # [*log_file*]
 #   (optional) The path of file used for logging
 #   If set to boolean false, it will not log to any file.
-#   Default: /var/log/glance/api.log
+#   Default: undef
 #
 #  [*log_dir*]
 #    (optional) directory to which glance logs are sent.
 #    If set to boolean false, it will not log to any directory.
-#    Defaults to '/var/log/glance'
+#    Defaults to undef
 #
 # [*registry_host*]
 #   (optional) The address used to connect to the registry service.
@@ -123,11 +123,15 @@
 #
 # [*use_syslog*]
 #   (optional) Use syslog for logging.
-#   Defaults to false.
+#   Defaults to undef
+#
+# [*use_stderr*]
+#   (optional) Use stderr for logging
+#   Defaults to undef
 #
 # [*log_facility*]
 #   (optional) Syslog facility to receive log lines.
-#   Defaults to 'LOG_USER'.
+#   Defaults to undef
 #
 # [*show_image_direct_url*]
 #   (optional) Expose image location to trusted clients.
@@ -149,9 +153,6 @@
 # [*ca_file*]
 #   (optional) CA certificate file to use to verify connecting clients
 #   Defaults to false, not set
-#
-# [*mysql_module*]
-#   (optional) Deprecated. Does nothing.
 #
 # [*known_stores*]
 #   (optional)List of which store classes and store class locations are
@@ -190,14 +191,14 @@
 class glance::api(
   $keystone_password,
   $package_ensure           = 'present',
-  $verbose                  = false,
-  $debug                    = false,
+  $verbose                  = undef,
+  $debug                    = undef,
   $bind_host                = '0.0.0.0',
   $bind_port                = '9292',
   $backlog                  = '4096',
   $workers                  = $::processorcount,
-  $log_file                 = '/var/log/glance/api.log',
-  $log_dir                  = '/var/log/glance',
+  $log_file                 = undef,
+  $log_dir                  = undef,
   $registry_host            = '0.0.0.0',
   $registry_port            = '9191',
   $registry_client_protocol = 'http',
@@ -209,8 +210,9 @@ class glance::api(
   $keystone_user            = 'glance',
   $manage_service           = true,
   $enabled                  = true,
-  $use_syslog               = false,
-  $log_facility             = 'LOG_USER',
+  $use_syslog               = undef,
+  $use_stderr               = undef,
+  $log_facility             = undef,
   $show_image_direct_url    = false,
   $purge_config             = false,
   $cert_file                = false,
@@ -224,7 +226,6 @@ class glance::api(
   $validate                 = false,
   $validation_options       = {},
   # DEPRECATED PARAMETERS
-  $mysql_module             = undef,
   $auth_host                = '127.0.0.1',
   $auth_url                 = 'http://localhost:5000/v2.0',
   $auth_port                = '35357',
@@ -233,31 +234,23 @@ class glance::api(
 ) inherits glance {
 
   include ::glance::policy
+  include ::glance::api::logging
   require keystone::python
 
-  if $mysql_module {
-    warning('The mysql_module parameter is deprecated. The latest 2.x mysql module will be used.')
-  }
-
   if ( $glance::params::api_package_name != $glance::params::registry_package_name ) {
-    ensure_packages([$glance::params::api_package_name],
+    ensure_packages('glance-api',
       {
         ensure => $package_ensure,
-        tag    => ['openstack'],
+        tag    => ['openstack', 'glance-package'],
       }
     )
   }
 
   Package[$glance::params::api_package_name] -> File['/etc/glance/']
   Package[$glance::params::api_package_name] -> Class['glance::policy']
-  Package[$glance::params::api_package_name] -> Glance_api_config<||>
-  Package[$glance::params::api_package_name] -> Glance_cache_config<||>
 
   # adding all of this stuff b/c it devstack says glance-api uses the
   # db now
-  Glance_api_config<||>   ~> Exec<| title == 'glance-manage db_sync' |>
-  Glance_cache_config<||> ~> Exec<| title == 'glance-manage db_sync' |>
-  Exec<| title == 'glance-manage db_sync' |> ~> Service['glance-api']
   Glance_api_config<||>   ~> Service['glance-api']
   Glance_cache_config<||> ~> Service['glance-api']
   Class['glance::policy'] ~> Service['glance-api']
@@ -291,8 +284,6 @@ class glance::api(
 
   # basic service config
   glance_api_config {
-    'DEFAULT/verbose':               value => $verbose;
-    'DEFAULT/debug':                 value => $debug;
     'DEFAULT/bind_host':             value => $bind_host;
     'DEFAULT/bind_port':             value => $bind_port;
     'DEFAULT/backlog':               value => $backlog;
@@ -314,8 +305,8 @@ class glance::api(
   }
 
   glance_cache_config {
-    'DEFAULT/verbose':             value => $verbose;
-    'DEFAULT/debug':               value => $debug;
+    'DEFAULT/verbose':             value => pick($verbose, false);
+    'DEFAULT/debug':               value => pick($debug, false);
     'glance_store/os_region_name': value => $os_region_name;
   }
 
@@ -442,39 +433,6 @@ class glance::api(
     }
   }
 
-  # Logging
-  if $log_file {
-    glance_api_config {
-      'DEFAULT/log_file': value  => $log_file;
-    }
-  } else {
-    glance_api_config {
-      'DEFAULT/log_file': ensure => absent;
-    }
-  }
-
-  if $log_dir {
-    glance_api_config {
-      'DEFAULT/log_dir': value  => $log_dir;
-    }
-  } else {
-    glance_api_config {
-      'DEFAULT/log_dir': ensure => absent;
-    }
-  }
-
-  # Syslog
-  if $use_syslog {
-    glance_api_config {
-      'DEFAULT/use_syslog'          : value => true;
-      'DEFAULT/syslog_log_facility' : value => $log_facility;
-    }
-  } else {
-    glance_api_config {
-      'DEFAULT/use_syslog': value => false;
-    }
-  }
-
   resources { 'glance_api_config':
     purge => $purge_config,
   }
@@ -498,6 +456,7 @@ class glance::api(
     enable     => $enabled,
     hasstatus  => true,
     hasrestart => true,
+    tag        => 'glance-service',
   }
 
   if $validate {

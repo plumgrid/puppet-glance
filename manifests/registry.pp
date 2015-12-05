@@ -13,10 +13,10 @@
 #    used because there is only one glance package.
 #
 #  [*verbose*]
-#    (optional) Enable verbose logs (true|false). Defaults to false.
+#    (optional) Enable verbose logs (true|false). Defaults to undef.
 #
 #  [*debug*]
-#    (optional) Enable debug logs (true|false). Defaults to false.
+#    (optional) Enable debug logs (true|false). Defaults to undef.
 #
 #  [*bind_host*]
 #    (optional) The address of the host to bind to. Defaults to '0.0.0.0'.
@@ -24,15 +24,20 @@
 #  [*bind_port*]
 #    (optional) The port the server should bind to. Defaults to '9191'.
 #
+#  [*workers*]
+#    (optional) The number of child process workers that will be
+#    created to service Registry requests.
+#    Defaults to: $::processorcount
+#
 #  [*log_file*]
 #    (optional) Log file for glance-registry.
 #    If set to boolean false, it will not log to any file.
-#    Defaults to '/var/log/glance/registry.log'.
+#    Defaults to undef.
 #
 #  [*log_dir*]
 #    (optional) directory to which glance logs are sent.
 #    If set to boolean false, it will not log to any directory.
-#    Defaults to '/var/log/glance'
+#    Defaults to undef.
 #
 # [*database_connection*]
 #   (optional) Connection url to connect to nova database.
@@ -84,11 +89,15 @@
 #
 #  [*use_syslog*]
 #    (optional) Use syslog for logging.
-#    Defaults to false.
+#    Defaults to undef.
+#
+#  [*use_stderr*]
+#    (optional) Use stderr for logging
+#    Defaults to undef.
 #
 #  [*log_facility*]
 #    (optional) Syslog facility to receive log lines.
-#    Defaults to LOG_USER.
+#    Defaults to undef.
 #
 #  [*manage_service*]
 #    (optional) If Puppet should manage service startup / shutdown.
@@ -119,18 +128,16 @@
 #   (Optional) Run db sync on the node.
 #   Defaults to true
 #
-#  [*mysql_module*]
-#  (optional) Deprecated. Does nothing.
-#
 class glance::registry(
   $keystone_password,
   $package_ensure        = 'present',
-  $verbose               = false,
-  $debug                 = false,
+  $verbose               = undef,
+  $debug                 = undef,
   $bind_host             = '0.0.0.0',
   $bind_port             = '9191',
-  $log_file              = '/var/log/glance/registry.log',
-  $log_dir               = '/var/log/glance',
+  $workers               = $::processorcount,
+  $log_file              = undef,
+  $log_dir               = undef,
   $database_connection   = 'sqlite:///var/lib/glance/glance.sqlite',
   $database_idle_timeout = 3600,
   $auth_type             = 'keystone',
@@ -139,8 +146,9 @@ class glance::registry(
   $keystone_tenant       = 'services',
   $keystone_user         = 'glance',
   $pipeline              = 'keystone',
-  $use_syslog            = false,
-  $log_facility          = 'LOG_USER',
+  $use_syslog            = undef,
+  $use_stderr            = undef,
+  $log_facility          = undef,
   $manage_service        = true,
   $enabled               = true,
   $purge_config          = false,
@@ -149,32 +157,26 @@ class glance::registry(
   $ca_file               = false,
   $sync_db               = true,
   # DEPRECATED PARAMETERS
-  $mysql_module          = undef,
   $auth_host             = '127.0.0.1',
   $auth_port             = '35357',
   $auth_admin_prefix     = false,
   $auth_protocol         = 'http',
 ) inherits glance {
 
+  include ::glance::registry::logging
   require keystone::python
 
-  if $mysql_module {
-    warning('The mysql_module parameter is deprecated. The latest 2.x mysql module will be used.')
-  }
-
   if ( $glance::params::api_package_name != $glance::params::registry_package_name ) {
-    ensure_packages( [$glance::params::registry_package_name],
+    ensure_packages( 'glance-registry',
       {
         ensure => $package_ensure,
-        tag    => ['openstack'],
+        tag    => ['openstack', 'glance-package'],
       }
     )
   }
 
   Package[$glance::params::registry_package_name] -> File['/etc/glance/']
-  Package[$glance::params::registry_package_name] -> Glance_registry_config<||>
 
-  Glance_registry_config<||> ~> Exec<| title == 'glance-manage db_sync' |>
   Glance_registry_config<||> ~> Service['glance-registry']
 
   File {
@@ -204,10 +206,9 @@ class glance::registry(
   }
 
   glance_registry_config {
-    'DEFAULT/verbose':   value => $verbose;
-    'DEFAULT/debug':     value => $debug;
-    'DEFAULT/bind_host': value => $bind_host;
-    'DEFAULT/bind_port': value => $bind_port;
+    'DEFAULT/workers':    value => $workers;
+    'DEFAULT/bind_host':  value => $bind_host;
+    'DEFAULT/bind_port':  value => $bind_port;
   }
 
   if $identity_uri {
@@ -315,39 +316,6 @@ class glance::registry(
     }
   }
 
-  # Logging
-  if $log_file {
-    glance_registry_config {
-      'DEFAULT/log_file': value  => $log_file;
-    }
-  } else {
-    glance_registry_config {
-      'DEFAULT/log_file': ensure => absent;
-    }
-  }
-
-  if $log_dir {
-    glance_registry_config {
-      'DEFAULT/log_dir': value  => $log_dir;
-    }
-  } else {
-    glance_registry_config {
-      'DEFAULT/log_dir': ensure => absent;
-    }
-  }
-
-  # Syslog
-  if $use_syslog {
-    glance_registry_config {
-      'DEFAULT/use_syslog':           value => true;
-      'DEFAULT/syslog_log_facility':  value => $log_facility;
-    }
-  } else {
-    glance_registry_config {
-      'DEFAULT/use_syslog': value => false;
-    }
-  }
-
   resources { 'glance_registry_config':
     purge => $purge_config
   }
@@ -357,16 +325,7 @@ class glance::registry(
   }
 
   if $sync_db {
-    Exec['glance-manage db_sync'] ~> Service['glance-registry']
-
-    exec { 'glance-manage db_sync':
-      command     => $::glance::params::db_sync_command,
-      path        => '/usr/bin',
-      user        => 'glance',
-      refreshonly => true,
-      logoutput   => on_failure,
-      subscribe   => [Package[$glance::params::registry_package_name], File['/etc/glance/glance-registry.conf']],
-    }
+    include ::glance::db::sync
   }
 
   if $manage_service {
@@ -386,7 +345,8 @@ class glance::registry(
     hasstatus  => true,
     hasrestart => true,
     subscribe  => File['/etc/glance/glance-registry.conf'],
-    require    => Class['glance']
+    require    => Class['glance'],
+    tag        => 'glance-service',
   }
 
 }

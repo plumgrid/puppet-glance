@@ -1,9 +1,9 @@
 require 'spec_helper'
 describe 'glance::notify::rabbitmq' do
   let :facts do
-    {
-      :osfamily => 'Debian'
-    }
+    @default_facts.merge({
+     :osfamily       => 'Debian',
+    })
   end
 
   let :pre_condition do
@@ -22,10 +22,12 @@ describe 'glance::notify::rabbitmq' do
     it { is_expected.to contain_glance_api_config('oslo_messaging_rabbit/rabbit_port').with_value('5672') }
     it { is_expected.to contain_glance_api_config('oslo_messaging_rabbit/rabbit_hosts').with_value('localhost:5672') }
     it { is_expected.to contain_glance_api_config('oslo_messaging_rabbit/rabbit_ha_queues').with_value('false') }
-    it { is_expected.to contain_glance_api_config('DEFAULT/amqp_durable_queues').with_value('false') }
+    it { is_expected.to contain_glance_api_config('oslo_messaging_rabbit/amqp_durable_queues').with_value('false') }
     it { is_expected.to contain_glance_api_config('oslo_messaging_rabbit/rabbit_virtual_host').with_value('/') }
     it { is_expected.to contain_glance_api_config('oslo_messaging_rabbit/rabbit_notification_exchange').with_value('glance') }
     it { is_expected.to contain_glance_api_config('oslo_messaging_rabbit/rabbit_notification_topic').with_value('notifications') }
+    it { is_expected.to contain_glance_api_config('oslo_messaging_rabbit/heartbeat_timeout_threshold').with_value('0') }
+    it { is_expected.to contain_glance_api_config('oslo_messaging_rabbit/heartbeat_rate').with_value('2') }
   end
 
   describe 'when passing params and use ssl' do
@@ -103,7 +105,7 @@ describe 'glance::notify::rabbitmq' do
     it { is_expected.to contain_glance_api_config('oslo_messaging_rabbit/rabbit_port').with_value('5673') }
     it { is_expected.to contain_glance_api_config('oslo_messaging_rabbit/rabbit_hosts').with_value('localhost2:5673') }
     it { is_expected.to contain_glance_api_config('oslo_messaging_rabbit/rabbit_use_ssl').with_value('true') }
-    it { is_expected.to contain_glance_api_config('DEFAULT/amqp_durable_queues').with_value('true') }
+    it { is_expected.to contain_glance_api_config('oslo_messaging_rabbit/amqp_durable_queues').with_value('true') }
   end
 
   describe 'when passing params for multiple rabbit hosts' do
@@ -122,6 +124,18 @@ describe 'glance::notify::rabbitmq' do
     it { is_expected.to_not contain_glance_api_config('oslo_messaging_rabbit/rabbit_host') }
   end
 
+  describe 'when passing params for rabbitmq heartbeat' do
+    let :params do
+      {
+        :rabbit_password                    => 'pass',
+        :rabbit_heartbeat_timeout_threshold => '60',
+        :rabbit_heartbeat_rate              => '10',
+      }
+    end
+    it { is_expected.to contain_glance_api_config('oslo_messaging_rabbit/heartbeat_timeout_threshold').with_value('60') }
+    it { is_expected.to contain_glance_api_config('oslo_messaging_rabbit/heartbeat_rate').with_value('10') }
+  end
+
   describe 'when using deprecated params' do
     let :params do
       {
@@ -129,6 +143,6 @@ describe 'glance::notify::rabbitmq' do
         :rabbit_password        => 'pass'
       }
     end
-    it { is_expected.to contain_glance_api_config('DEFAULT/amqp_durable_queues').with_value('true') }
+    it { is_expected.to contain_glance_api_config('oslo_messaging_rabbit/amqp_durable_queues').with_value('true') }
   end
 end

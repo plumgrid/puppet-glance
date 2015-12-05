@@ -2,11 +2,9 @@ require 'spec_helper'
 
 describe 'glance::backend::file' do
   let :facts do
-    { :osfamily => 'Debian' }
-  end
-
-  let :pre_condition do
-    'class { "glance::api": keystone_password => "pass" }'
+      @default_facts.merge({
+        :osfamily       => 'Debian',
+      })
   end
 
   it 'configures glance-api.conf' do
